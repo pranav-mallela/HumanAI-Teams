@@ -1,6 +1,9 @@
 from dependencies import *
 from combiner import *
 import random
+from sklearn import metrics
+import matplotlib.pyplot as plt
+import numpy as np
 
 def load_CIFAR10H(model_name):
     """ Loads the CIFAR-10H predictions (human and model) and true labels.
@@ -53,61 +56,24 @@ def get_acc(y_pred, y_true):
         return np.mean(y_pred == y_true)
     print("Invalid Arguments")
 
-def check_parity(mode, conf_num, test_size, model_name, policy_name):
-    for j in range(10):
-        tr_p = conf_mat[mode][conf_num][j][j]
-        tr_n = 0
-        fa_p = 0
-        fa_n = 0
-        for p in range(10):
-            for q in range(10):
-                if(p!=j and q!=j):
-                    tr_n += conf_mat[mode][conf_num][p][q]
-                elif p==j and p==q:
-                    continue
-                elif p==j:
-                    fa_p += conf_mat[mode][conf_num][p][q]
-                else:
-                    fa_n += conf_mat[mode][conf_num][p][q]
-        tot = tr_p + tr_n + fa_p + fa_n
-        dem_from_conf_mat[mode][conf_num][j] = (tr_p + fa_p)/tot #predicted positive/total sum
-        acc_from_conf_mat[mode][conf_num][j] = (tr_p + tr_n)/tot #sum of diagonal/total sum
-        tpp_from_conf_mat[mode][conf_num][j] = (tr_p)/(tr_p + fa_n) #true positive/predicted positive
-        fpp_from_conf_mat[mode][conf_num][j] = (fa_p)/(tr_p + fa_n) #false positive/predicted positive
-        ppv_from_conf_mat[mode][conf_num][j] = (tr_p)/(tr_p + fa_p) #true positive/positive condition
-    titles[mode].append(str(mode) + " " + str(test_size) + " " + str(model_name) + " " + policy_name)
-    outf.write(titles[mode][conf_num] + "\n")
-    outf.write(str(tr_p) + " " +  str(fa_p) + " " + str(tr_n) + " " + str(fa_n) + "\n")
-    outf.write(str(conf_mat[mode][conf_num]) + "\n\n")
-    outf.write("Proportion of positive predictions: \n" + str(dem_from_conf_mat[mode][conf_num]) + "\n")
-    outf.write("Accuracy per class: \n" + str(acc_from_conf_mat[mode][conf_num]) + "\n")
-    outf.write("TP proportion per class: \n" + str(tpp_from_conf_mat[mode][conf_num]) + "\n")
-    outf.write("FP proportion per class: \n" + str(fpp_from_conf_mat[mode][conf_num]) + "\n")
-    outf.write("PPV per class: \n" + str(ppv_from_conf_mat[mode][conf_num]) + "\n\n")
-
 def main():
 
     n_runs = 10
     test_sizes = [0.999, 0.99, 0.9, 0.0001]
+    # test_sizes=[0.9]
 
     out_fpath = './output/'
     os.makedirs(out_fpath, exist_ok=True)
     model_names = ['cnn_data']
-############################################################
-    test_size_num = -1
-############################################################
+
     for test_size in test_sizes:
-        test_size_num += 1
+
         for model_name in tqdm(model_names, desc='Models', leave=True):
             # Specify output files
             output_file_acc = out_fpath + f'{model_name}_accuracy_{str(accuracies)}_{int((1-test_size)*10000)}'
 
             # Load data
             human_counts, model_probs, y_true = load_CIFAR10H(model_name)
-
-            # print(human_counts)
-            # print(model_probs)
-            # print(y_true) 
 
             # Generate human output from human counts through simulation
             y_h = simulate_humans(human_counts, y_true, accuracy_list=accuracies)
@@ -122,19 +88,21 @@ def main():
                 ('pseudo_lb_best_policy_overloaded', pseudo_lb_best_policy_overloaded, False)
             ]
 
+            ###################################
+            con_mat_all=dict()
+
+            for policy_name,_,_ in POLICIES:
+                con_mat_all[policy_name]=np.zeros((10,10))
+            
+            ###################################
+
             acc_data = []
             for i in tqdm(range(n_runs), leave=False, desc='Runs'):
                 seed = random.randint(1, 1000)
                 # Train/test split
                 y_h_tr, y_h_te, model_probs_tr, model_probs_te, y_true_tr, y_true_te = train_test_split(
                     y_h, model_probs, y_true, test_size=test_size, random_state=i * seed)
-#############################################################
-                y_cnn_model = np.zeros((10000), dtype=int)
-                ind=-1
-                for sublist in model_probs:
-                    ind += 1
-                    y_cnn_model[ind] = np.where(sublist==max(sublist))[0][0]
-#############################################################
+
                 # Test over entire dataset
                 y_h_te = y_h
                 model_probs_te = model_probs
@@ -150,55 +118,55 @@ def main():
                 combiner = MAPOracleCombiner()
 
                 combiner.fit(model_probs_tr, y_h_tr, y_true_tr)
-                
-                policy_num = -1
 
                 for policy_name, policy, use_true_labels in POLICIES:
-                    
-####################################################
-                    policy_num += 1
-                    conf_num = test_size_num*7 + policy_num
-####################################################
 
                     humans = policy(combiner, y_h_te, y_true_te if use_true_labels else None, np.argmax(model_probs_te, axis=1), NUM_HUMANS, model_probs_te.shape[1])
                     
                     y_comb_te = combiner.combine(model_probs_te, y_h_te, humans)
 
-##################################################
-                    for image in range(10000):
-                        c_i = y_comb_te[image]
-                        y_i = y_true_te[image]
-                        m_i = y_cnn_model[image]
-                        conf_mat[0][conf_num][c_i][y_i] += 1
-                        conf_mat[1][conf_num][m_i][y_i] += 1
+                    ###################################
+                    cm=metrics.confusion_matrix(y_true_te, y_comb_te)
+                    con_mat_all[policy_name]+=cm
 
+                    ###################################
                     acc_comb = get_acc(y_comb_te, y_true_te)
-
-                    if i == n_runs-1:
-                        check_parity(0, conf_num, test_size, model_name, policy_name)
-                        check_parity(1, conf_num, test_size, model_name, policy_name)
-#################################################################
-
                     _acc_data.append(acc_comb)
 
                 acc_data += [_acc_data]
+
+            ###################################
+
+            # for pl in con_mat_all:
+            #     np.savetxt(f'./confusion_matrix_full/cf_{model_name}_{pl}_{test_size}.csv', con_mat_all[pl], delimiter=",")
+
+            #cf_com is combined confusion matrix, rows are correct labels, columns are predicted labels
+            # firstly, we have false results, then true results in each row or colum
+
+            for pl in con_mat_all:
+                cf_com=np.zeros((2,2))
+                cf_curr=con_mat_all[pl]
+
+                for i in range(10):
+                    cf_com[1][1]+=cf_curr[i][i]
+                    for j in range(10):
+                        if i!=j:
+                            cf_com[0][1]+=cf_curr[j][i]
+                            cf_com[1][0]+=cf_curr[i][j]
+
+                    for p in range(10):
+                        for q in range(10):
+                            if( p!=i and q!=i):
+                                cf_com[0][0]+=cf_curr[p][q]
+                
+                np.savetxt(f'./confusion_matrix_2_way/cf_2way_{model_name}_{pl}_{test_size}.csv', cf_com, delimiter=",")
+
+            ###################################
 
             header_acc = ['human', 'model'] + [policy_name for policy_name, _, _ in POLICIES]
             with open(f'{output_file_acc}_{i}.csv', 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(header_acc)
                 writer.writerows(acc_data)
-
-outf = open("outf.txt", "w")
-# comb_conf_mat = np.zeros((28, 10, 10), dtype=int)
-# cnn_conf_mat = np.zeros((28, 10, 10), dtype=int)
-conf_mat = np.zeros((2, 28, 10, 10), dtype=int) #mode = 0 => combined model; mode = 1 => only cnn model
-"""Parity Measures:"""
-acc_from_conf_mat = np.zeros((2, 28, 10))
-dem_from_conf_mat = np.zeros((2, 28, 10))
-tpp_from_conf_mat = np.zeros((2, 28, 10))
-fpp_from_conf_mat = np.zeros((2, 28, 10))
-ppv_from_conf_mat = np.zeros((2, 28, 10))
-titles = [[],[]]
 
 main()
