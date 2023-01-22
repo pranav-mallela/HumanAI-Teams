@@ -165,7 +165,8 @@ def main():
                     y_comb_te = combiner.combine(model_probs_te, y_h_te, humans)
 
 ##################################################
-                    for image in range(10000):
+                    no_images = 10000
+                    for image in range(no_images):
                         c_i = y_comb_te[image]
                         y_i = y_true_te[image]
                         m_i = y_cnn_model[image]

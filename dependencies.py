@@ -1,7 +1,7 @@
 # accuracies = [0.80, 0.77, 0.75, 0.72, 0.70, 0.67, 0.65, 0.63, 0.60, 0.57, 0.55, 0.53, 0.50] # must be in non-increasing order
 # accuracies = [0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50] # must be in non-increasing order
 # accuracies = [0.80, 0.75, 0.70, 0.65] # must be in non-increasing order
-accuracies = [0.7] * 5
+accuracies = [0.7]*5
 accuracies.sort(reverse=1)
 NUM_HUMANS = len(accuracies)
 
