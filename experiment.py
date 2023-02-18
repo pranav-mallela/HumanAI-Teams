@@ -54,6 +54,8 @@ def get_acc(y_pred, y_true):
     print("Invalid Arguments")
 
 def check_parity(mode, conf_num, test_size, model_name, policy_name):
+
+    # constructing (2x2 conf mat for each class j) from (dim 10x10 conf mat for all)
     for j in range(10):
         tr_p = conf_mat[mode][conf_num][j][j]
         tr_n = 0
@@ -70,11 +72,15 @@ def check_parity(mode, conf_num, test_size, model_name, policy_name):
                 else:
                     fa_n += conf_mat[mode][conf_num][p][q]
         tot = tr_p + tr_n + fa_p + fa_n
+
+        # using fairness metrics as defined on a 2x2 conf mat
         dem_from_conf_mat[mode][conf_num][j] = (tr_p + fa_p)/tot #predicted positive/total sum
         acc_from_conf_mat[mode][conf_num][j] = (tr_p + tr_n)/tot #sum of diagonal/total sum
         tpp_from_conf_mat[mode][conf_num][j] = (tr_p)/(tr_p + fa_n) #true positive/predicted positive
         fpp_from_conf_mat[mode][conf_num][j] = (fa_p)/(tr_p + fa_n) #false positive/predicted positive
         ppv_from_conf_mat[mode][conf_num][j] = (tr_p)/(tr_p + fa_p) #true positive/positive condition
+
+    # writing to outf    
     titles[mode].append(str(mode) + " " + str(test_size) + " " + str(model_name) + " " + policy_name)
     outf.write(titles[mode][conf_num] + "\n")
     outf.write(str(tr_p) + " " +  str(fa_p) + " " + str(tr_n) + " " + str(fa_n) + "\n")
@@ -103,11 +109,7 @@ def main():
             output_file_acc = out_fpath + f'{model_name}_accuracy_{str(accuracies)}_{int((1-test_size)*10000)}'
 
             # Load data
-            human_counts, model_probs, y_true = load_CIFAR10H(model_name)
-
-            # print(human_counts)
-            # print(model_probs)
-            # print(y_true) 
+            human_counts, model_probs, y_true = load_CIFAR10H(model_name) 
 
             # Generate human output from human counts through simulation
             y_h = simulate_humans(human_counts, y_true, accuracy_list=accuracies)
@@ -129,11 +131,15 @@ def main():
                 y_h_tr, y_h_te, model_probs_tr, model_probs_te, y_true_tr, y_true_te = train_test_split(
                     y_h, model_probs, y_true, test_size=test_size, random_state=i * seed)
 #############################################################
+
+                # picking the label that has the highest model probability
+                # in order to evaluate the model's performance before combining human labels
                 y_cnn_model = np.zeros((10000), dtype=int)
                 ind=-1
                 for sublist in model_probs:
                     ind += 1
                     y_cnn_model[ind] = np.where(sublist==max(sublist))[0][0]
+
 #############################################################
                 # Test over entire dataset
                 y_h_te = y_h
@@ -156,6 +162,8 @@ def main():
                 for policy_name, policy, use_true_labels in POLICIES:
                     
 ####################################################
+                    # There are test_sizes*no_of_policies number of confusion matrices of dim 10x10
+                    # Because each policy combines human input differently for each test_size
                     policy_num += 1
                     conf_num = test_size_num*7 + policy_num
 ####################################################
@@ -167,15 +175,17 @@ def main():
 ##################################################
                     no_images = 10000
                     for image in range(no_images):
-                        c_i = y_comb_te[image]
-                        y_i = y_true_te[image]
-                        m_i = y_cnn_model[image]
-                        conf_mat[0][conf_num][c_i][y_i] += 1
-                        conf_mat[1][conf_num][m_i][y_i] += 1
+                        c_i = y_comb_te[image] # label of combined model
+                        y_i = y_true_te[image] # ground truth
+                        m_i = y_cnn_model[image] # label of CNN model without human labels
+                        conf_mat[0][conf_num][c_i][y_i] += 1 # incrementing combined model Conf Mat
+                        conf_mat[1][conf_num][m_i][y_i] += 1 # incrementing CNN model Conf Mat
 
                     acc_comb = get_acc(y_comb_te, y_true_te)
 
+                    # running on one of the test sizes is complete
                     if i == n_runs-1:
+                        # mode = 0 => combined model; mode = 1 => only cnn model
                         check_parity(0, conf_num, test_size, model_name, policy_name)
                         check_parity(1, conf_num, test_size, model_name, policy_name)
 #################################################################
@@ -190,16 +200,18 @@ def main():
                 writer.writerow(header_acc)
                 writer.writerows(acc_data)
 
+# open file pointer to txt file to print conf mat and fairness metrics
 outf = open("outf.txt", "w")
-# comb_conf_mat = np.zeros((28, 10, 10), dtype=int)
-# cnn_conf_mat = np.zeros((28, 10, 10), dtype=int)
-conf_mat = np.zeros((2, 28, 10, 10), dtype=int) #mode = 0 => combined model; mode = 1 => only cnn model
+
+# 7 policies * 4 test sizes = 28
+conf_mat = np.zeros((2, 28, 10, 10), dtype=int)
+
 """Parity Measures:"""
-acc_from_conf_mat = np.zeros((2, 28, 10))
-dem_from_conf_mat = np.zeros((2, 28, 10))
-tpp_from_conf_mat = np.zeros((2, 28, 10))
-fpp_from_conf_mat = np.zeros((2, 28, 10))
-ppv_from_conf_mat = np.zeros((2, 28, 10))
+acc_from_conf_mat = np.zeros((2, 28, 10)) # accuracy
+dem_from_conf_mat = np.zeros((2, 28, 10)) # demographic parity
+tpp_from_conf_mat = np.zeros((2, 28, 10)) # true positive parity
+fpp_from_conf_mat = np.zeros((2, 28, 10)) # false positive parity
+ppv_from_conf_mat = np.zeros((2, 28, 10)) # positive prediction value
 titles = [[],[]]
 
 main()
